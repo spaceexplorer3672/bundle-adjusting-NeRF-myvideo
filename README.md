@@ -1,165 +1,245 @@
-## BARF :vomiting_face:: Bundle-Adjusting Neural Radiance Fields
-[Chen-Hsuan Lin](https://chenhsuanlin.bitbucket.io/),
-[Wei-Chiu Ma](http://people.csail.mit.edu/weichium/),
-[Antonio Torralba](https://groups.csail.mit.edu/vision/torralbalab/),
-and [Simon Lucey](http://ci2cv.net/people/simon-lucey/)  
-IEEE International Conference on Computer Vision (ICCV), 2021 (**oral presentation**) 
+📘 README – Running BARF on myvideo
 
-Project page: https://chenhsuanlin.bitbucket.io/bundle-adjusting-NeRF  
-Paper: https://chenhsuanlin.bitbucket.io/bundle-adjusting-NeRF/paper.pdf  
-arXiv preprint: https://arxiv.org/abs/2104.06405  
+This repository contains an implementation of BARF (Bundle-Adjusting NeRF) modified to work with your own custom dataset myvideo, stored under:
 
-We provide PyTorch code for all experiments: planar image alignment, NeRF/BARF on both synthetic (Blender) and real-world (LLFF) datasets, and a template for BARFing on your custom sequence.
+data/blender/myvideo/
 
---------------------------------------
 
-### Prerequisites
+The repo also supports standard Blender-style datasets with transforms_train.json, transforms_val.json, and transforms_test.json.
 
-- Note: for Azure ML support for this repository, please consider checking out [this branch](https://github.com/szymanowiczs/bundle-adjusting-NeRF/tree/azureml_training_script) by Stan Szymanowicz.
+This guide explains how to set up, prepare your dataset, train, evaluate, and access outputs for the run named myvideo_run under the experiment group test_group.
 
-This code is developed with Python3 (`python3`). PyTorch 1.9+ is required.  
-It is recommended use [Anaconda](https://www.anaconda.com/products/individual) to set up the environment. Install the dependencies and activate the environment `barf-env` with
-```bash
-conda env create --file requirements.yaml python=3
+🛠️ 1. Installation
+
+Create a Python environment and install dependencies:
+
+conda create -n barf-env python=3.10 -y
 conda activate barf-env
-```
-Initialize the external submodule dependencies with
-```bash
-git submodule update --init --recursive
-```
 
---------------------------------------
+pip install -r requirements.txt
 
-### Dataset
 
-- #### Synthetic data (Blender) and real-world data (LLFF)
-    Both the Blender synthetic data and LLFF real-world data can be found in the [NeRF Google Drive](https://drive.google.com/drive/folders/128yBriW1IG_3NJ5Rp7APSTZsJqdJdfc1).
-For convenience, you can download them with the following script: (under this repo)
-  ```bash
-  # Blender
-  gdown --id 18JxhpWD-4ZmuFKLzKlAw-w5PpzZxXOcG # download nerf_synthetic.zip
-  unzip nerf_synthetic.zip
-  rm -f nerf_synthetic.zip
-  mv nerf_synthetic data/blender
-  # LLFF
-  gdown --id 16VnMcF1KJYxN9QId6TClMsZRahHNMW5g # download nerf_llff_data.zip
-  unzip nerf_llff_data.zip
-  rm -f nerf_llff_data.zip
-  mv nerf_llff_data data/llff
-  ```
-  The `data` directory should contain the subdirectories `blender` and `llff`.
-  If you already have the datasets downloaded, you can alternatively soft-link them within the `data` directory.
+OR install dependencies manually if no requirements file exists.
 
-- #### <span style="color:red">Test your own sequence!</span>
-  If you want to try BARF on your own sequence, we provide a template data file in `data/iphone.py`, which is an example to read from a sequence captured by an iPhone 12.
-  You should modify `get_image()` to read each image sample and set the raw image sizes (`self.raw_H`, `self.raw_W`) and focal length (`self.focal`) according to your camera specs.  
-  You may ignore the camera poses as they are assumed unknown in this case, which we simply set to zero vectors.
+📁 2. Repository Structure (Important Paths)
 
---------------------------------------
+bundle-adjusting-NeRF/
+│
+├── data/
+│   ├── blender/
+│   │   └── myvideo/
+│   │       ├── images/                 # video frames
+│   │       ├── transforms_train.json   # train split
+│   │       ├── transforms_val.json     # validation split
+│   │       └── transforms_test.json    # test split
+│   │
+│   ├── myvideo.py                      # custom dataset loader definition
+│   ├── blender.py, llff.py, iphone.py  # other dataset loaders
+│
+├── model/
+│   └── ...                             # BARF model files
+│
+├── output/
+│   └── test_group/
+│       ├── myvideo_run/                # main run (checkpoints, logs, renders)
+│       └── myvideo_quick/
+│
+├── train.py
+├── evaluate.py
+├── extract_mesh.py
+├── options.py
+└── camera.py
 
-### Running the code
 
-- #### BARF models
-  To train and evaluate BARF:
-  ```bash
-  # <GROUP> and <NAME> can be set to your likes, while <SCENE> is specific to datasets
-  
-  # Blender (<SCENE>={chair,drums,ficus,hotdog,lego,materials,mic,ship})
-  python3 train.py --group=<GROUP> --model=barf --yaml=barf_blender --name=<NAME> --data.scene=<SCENE> --barf_c2f=[0.1,0.5]
-  python3 evaluate.py --group=<GROUP> --model=barf --yaml=barf_blender --name=<NAME> --data.scene=<SCENE> --data.val_sub= --resume
-  
-  # LLFF (<SCENE>={fern,flower,fortress,horns,leaves,orchids,room,trex})
-  python3 train.py --group=<GROUP> --model=barf --yaml=barf_llff --name=<NAME> --data.scene=<SCENE> --barf_c2f=[0.1,0.5]
-  python3 evaluate.py --group=<GROUP> --model=barf --yaml=barf_llff --name=<NAME> --data.scene=<SCENE> --resume
-  ```
-  All the results will be stored in the directory `output/<GROUP>/<NAME>`.
-  You may want to organize your experiments by grouping different runs in the same group.
+🎞️ 3. Preparing the myvideo Dataset
 
-  To train baseline models:
-  - Full positional encoding: omit the `--barf_c2f` argument.
-  - No positional encoding: add `--arch.posenc!`.
-  
-  If you want to evaluate a checkpoint at a specific iteration number, use `--resume=<ITER_NUMBER>` instead of just `--resume`.
+Your dataset must be inside:
 
-- #### Training the original NeRF
-  If you want to train the reference NeRF models (assuming known camera poses):
-  ```bash
-  # Blender
-  python3 train.py --group=<GROUP> --model=nerf --yaml=nerf_blender --name=<NAME> --data.scene=<SCENE>
-  python3 evaluate.py --group=<GROUP> --model=nerf --yaml=nerf_blender --name=<NAME> --data.scene=<SCENE> --data.val_sub= --resume
-  
-  # LLFF
-  python3 train.py --group=<GROUP> --model=nerf --yaml=nerf_llff --name=<NAME> --data.scene=<SCENE>
-  python3 evaluate.py --group=<GROUP> --model=nerf --yaml=nerf_llff --name=<NAME> --data.scene=<SCENE> --resume
-  ```
-  If you wish to replicate the results from the original NeRF paper, use `--yaml=nerf_blender_repr` or `--yaml=nerf_llff_repr` instead for Blender or LLFF respectively.
-  There are some differences, e.g. NDC will be used for the LLFF forward-facing dataset.
-  (The reference NeRF models considered in the paper do not use NDC to parametrize the 3D points.)
+data/blender/myvideo/
 
-- #### Planar image alignment experiment
-  If you want to try the planar image alignment experiment, run:
-  ```bash
-  python3 train.py --group=<GROUP> --model=planar --yaml=planar --name=<NAME> --seed=3 --barf_c2f=[0,0.4]
-  ```
-  This will fit a neural image representation to a single image (default to `data/cat.jpg`), which takes a couple of minutes to optimize on a modern GPU.
-  The seed number is set to reproduce the pre-generated warp perturbations in the paper.
-  For the baseline methods, modify the arguments similarly as in the NeRF case above:
-  - Full positional encoding: omit the `--barf_c2f` argument.
-  - No positional encoding: add `--arch.posenc!`.
 
-  A video `vis.mp4` will also be created to visualize the optimization process.
+It MUST contain:
 
-- #### Visualizing the results
-  We have included code to visualize the training over TensorBoard and Visdom.
-  The TensorBoard events include the following:
-  - **SCALARS**: the rendering losses and PSNR over the course of optimization. For BARF, the rotational/translational errors with respect to the given poses are also computed.
-  - **IMAGES**: visualization of the RGB images and the RGB/depth rendering.
-  
-  We also provide visualization of 3D camera poses in Visdom.
-  Run `visdom -port 9000` to start the Visdom server.  
-  The Visdom host server is default to `localhost`; this can be overridden with `--visdom.server` (see `options/base.yaml` for details).
-  If you want to disable Visdom visualization, add `--visdom!`.
+data/blender/myvideo/
+├── images/                 # extracted video frames
+├── transforms_train.json
+├── transforms_val.json
+└── transforms_test.json
 
-  The `extract_mesh.py` script provides a simple way to extract the underlying 3D geometry using marching cubes. Run as follows:
-  ```bash
-  python3 extract_mesh.py --group=<GROUP> --model=barf --yaml=barf_blender --name=<NAME> --data.scene=<SCENE> --data.val_sub= --resume
-  ```
-  This works for both BARF and the original NeRF (by modifying the command line accordingly). This is currently supported only for the Blender dataset.
 
---------------------------------------
-### Codebase structure
+The JSON files must follow the Blender NeRF format, for example:
 
-The main engine and network architecture in `model/barf.py` inherit those from `model/nerf.py`.
-This codebase is structured so that it is easy to understand the actual parts BARF is extending from NeRF.
-It is also simple to build your exciting applications upon either BARF or NeRF -- just inherit them again!
-This is the same for dataset files (e.g. `data/blender.py`).
-
-To understand the config and command lines, take the below command as an example:
-```bash
-python3 train.py --group=<GROUP> --model=barf --yaml=barf_blender --name=<NAME> --data.scene=<SCENE> --barf_c2f=[0.1,0.5]
-```
-This will run `model/barf.py` as the main engine with `options/barf_blender.yaml` as the main config file.
-Note that `barf` hierarchically inherits `nerf` (which inherits `base`), making the codebase customizable.  
-The complete configuration will be printed upon execution.
-To override specific options, add `--<key>=value` or `--<key1>.<key2>=value` (and so on) to the command line. The configuration will be loaded as the variable `opt` throughout the codebase.  
-  
-Some tips on using and understanding the codebase:
-- The computation graph for forward/backprop is stored in `var` throughout the codebase.
-- The losses are stored in `loss`. To add a new loss function, just implement it in `compute_loss()` and add its weight to `opt.loss_weight.<name>`. It will automatically be added to the overall loss and logged to Tensorboard.
-- If you are using a multi-GPU machine, you can add `--gpu=<gpu_number>` to specify which GPU to use. Multi-GPU training/evaluation is currently not supported.
-- To resume from a previous checkpoint, add `--resume=<ITER_NUMBER>`, or just `--resume` to resume from the latest checkpoint.
-- (to be continued....)
-  
---------------------------------------
-
-If you find our code useful for your research, please cite
-```
-@inproceedings{lin2021barf,
-  title={BARF: Bundle-Adjusting Neural Radiance Fields},
-  author={Lin, Chen-Hsuan and Ma, Wei-Chiu and Torralba, Antonio and Lucey, Simon},
-  booktitle={IEEE International Conference on Computer Vision ({ICCV})},
-  year={2021}
+{
+  "camera_angle_x": 0.69111122,
+  "frames": [
+    {
+      "file_path": "images/frame00001.png",
+      "transform_matrix": [
+        [0.999, 0.001, 0.001, 0.0],
+        [-0.001, 0.999, 0.001, 0.0],
+        [-0.001, -0.001, 0.999, 0.0],
+        [0.0, 0.0, 0.0, 1.0]
+      ]
+    },
+    ...
+  ]
 }
-```
 
-Please contact me (chlin@cmu.edu) if you have any questions!
+
+Make sure myvideo.py correctly wraps this data format for the training pipeline.
+
+🚀 4. Training BARF on myvideo
+
+Run the following command from the repository root:
+
+python3 train.py \
+  --group=test_group \
+  --model=barf \
+  --yaml=barf_blender \
+  --name=myvideo_run \
+  --data.dataset=myvideo \
+  --data.root=data/blender/myvideo \
+  --barf_c2f='[0.1,0.5]' \
+  --max_iter=70000 \
+  --freq.ckpt=7000 \
+  --data.num_workers=0 \
+  --data.preload=False
+
+
+Training outputs will be saved to:
+
+output/test_group/myvideo_run/
+├── ckpts/
+├── events/
+├── train_renders/
+└── logs.txt
+
+
+Key Arguments Explained
+
+Flag
+
+Meaning
+
+--group=test_group
+
+Folder under output/
+
+--name=myvideo_run
+
+Subfolder name inside the group
+
+--yaml=barf_blender
+
+BARF config file
+
+--data.dataset=myvideo
+
+Tells code to use data/myvideo.py
+
+--data.root=data/blender/myvideo
+
+Path to your dataset
+
+--barf_c2f='[0.1,0.5]'
+
+Coarse-to-fine pose schedule
+
+--max_iter=70000
+
+Total training iterations
+
+--freq.ckpt=7000
+
+Save checkpoint every 7k iters
+
+🧪 5. Evaluating the Trained Model
+
+To run evaluation using the latest checkpoint:
+
+python3 evaluate.py \
+  --group=test_group \
+  --model=barf \
+  --yaml=barf_blender \
+  --name=myvideo_run \
+  --data.dataset=myvideo \
+  --data.root=data/blender/myvideo \
+  --resume
+
+
+This loads:
+
+output/test_group/myvideo_run/ckpts/latest.pth
+
+
+Evaluation outputs appear under:
+
+output/test_group/myvideo_run/eval/
+
+
+Typically includes renderings, metrics (PSNR, SSIM, LPIPS), and visualizations.
+
+🗂️ 6. Checkpoints & Large Files
+
+Checkpoints are created every 7000 iterations:
+
+output/test_group/myvideo_run/ckpts/iter_7000.pth
+output/test_group/myvideo_run/ckpts/iter_14000.pth
+...
+
+
+⚠️ Important: If a checkpoint exceeds 5 GB, DO NOT push it to git. Use GitHub Releases instead, or HuggingFace Hub.
+
+🧩 7. Troubleshooting
+
+1. GPU Out of Memory
+
+Reduce image resolution in transforms JSON.
+
+Lower batch size (if configurable).
+
+Close other GPU processes.
+
+2. “Cannot load dataset”
+
+Verify both flags:
+
+--data.dataset=myvideo
+--data.root=data/blender/myvideo
+
+
+And ensure that myvideo.py implements the dataset class correctly.
+
+3. Checkpoint not loading
+
+Ensure you are using the same values for:
+
+group
+
+name
+
+model
+
+YAML file
+
+4. Wrong image paths
+
+Check JSON paths:
+
+"file_path": "images/frame00001.png"
+
+
+Paths should be relative to the dataset root (data/blender/myvideo).
+
+🏁 8. Quick Start (Summary)
+
+# Train
+python3 train.py --group=test_group --model=barf --yaml=barf_blender \
+  --name=myvideo_run --data.dataset=myvideo \
+  --data.root=data/blender/myvideo --barf_c2f='[0.1,0.5]' \
+  --max_iter=70000 --freq.ckpt=7000
+
+# Evaluate
+python3 evaluate.py --group=test_group --model=barf \
+  --yaml=barf_blender --name=myvideo_run \
+  --data.dataset=myvideo --data.root=data/blender/myvideo --resume
