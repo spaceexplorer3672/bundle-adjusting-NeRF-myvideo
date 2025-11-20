@@ -49,7 +49,7 @@ optim:                                                      # optimization optio
 
 batch_size:                                                 # batch size (not used for NeRF/BARF)
 max_epoch:                                                  # train to maximum number of epochs (not used for NeRF/BARF)
-max_iter: 200000                                            # train to maximum number of iterations
+max_iter: 70000                                          # train to maximum number of iterations
 
 trimesh:                                                    # options for marching cubes to extract 3D mesh
     res: 128                                                # 3D sampling resolution

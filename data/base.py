@@ -15,18 +15,55 @@ from util import log,debug
 
 class Dataset(torch.utils.data.Dataset):
 
-    def __init__(self,opt,split="train"):
+    def __init__(self, opt, split="train", **kwargs):
+        """
+        Base Dataset initializer.
+
+        - Accepts extra keyword args (e.g., subset, val_sub) to be robust
+        against different dataset factory call-sites.
+        - Subclasses are expected to set self.raw_H and self.raw_W *before*
+        calling super().__init__(...) OR set them immediately after instantiation
+        (many dataset implementations call super() at the end).
+        """
         super().__init__()
         self.opt = opt
         self.split = split
-        self.augment = split=="train" and opt.data.augment
+        self.augment = (split == "train") and getattr(opt.data, "augment", False)
+
+        # accept optional subset parameters passed from caller (train_sub / val_sub)
+        # store them for later use by subclasses or loader logic
+        self.subset = kwargs.get("subset", None)   # e.g., opt.data.train_sub
+        self.val_sub = kwargs.get("val_sub", None)
+
         # define image sizes
-        if opt.data.center_crop is not None:
-            self.crop_H = int(self.raw_H*opt.data.center_crop)
-            self.crop_W = int(self.raw_W*opt.data.center_crop)
-        else: self.crop_H,self.crop_W = self.raw_H,self.raw_W
-        if not opt.H or not opt.W:
-            opt.H,opt.W = self.crop_H,self.crop_W
+        # Note: many subclasses set self.raw_H/self.raw_W before calling this.
+        # If they haven't been set yet, fall back to opt values or None temporarily.
+        raw_H = getattr(self, "raw_H", None)
+        raw_W = getattr(self, "raw_W", None)
+
+        if opt.data.center_crop is not None and raw_H is not None and raw_W is not None:
+            self.crop_H = int(raw_H * opt.data.center_crop)
+            self.crop_W = int(raw_W * opt.data.center_crop)
+        else:
+            # If subclass hasn't provided raw_H/raw_W yet, try to use opt.H/opt.W or set crop to None.
+            if raw_H is None:
+                raw_H = getattr(opt, "H", None)
+            if raw_W is None:
+                raw_W = getattr(opt, "W", None)
+            self.crop_H = int(raw_H * opt.data.center_crop) if (opt.data.center_crop is not None and raw_H is not None) else raw_H
+            self.crop_W = int(raw_W * opt.data.center_crop) if (opt.data.center_crop is not None and raw_W is not None) else raw_W
+
+        # If crop sizes are still None, set them to opt.H/opt.W if available
+        if self.crop_H is None:
+            self.crop_H = getattr(opt, "H", None)
+        if self.crop_W is None:
+            self.crop_W = getattr(opt, "W", None)
+
+        # If opt.H / opt.W are not set (None/0), set them to crop sizes if we have them
+        if not getattr(opt, "H", None) or not getattr(opt, "W", None):
+            if self.crop_H is not None and self.crop_W is not None:
+                opt.H, opt.W = int(self.crop_H), int(self.crop_W)
+
 
     def setup_loader(self,opt,shuffle=False,drop_last=False):
         loader = torch.utils.data.DataLoader(self,

@@ -9,6 +9,7 @@ import visdom
 import importlib
 import tqdm
 from easydict import EasyDict as edict
+import data
 
 import util,util_vis
 from util import log,debug
@@ -21,15 +22,117 @@ class Model():
         super().__init__()
         os.makedirs(opt.output_path,exist_ok=True)
 
-    def load_dataset(self,opt,eval_split="val"):
-        data = importlib.import_module("data.{}".format(opt.data.dataset))
-        log.info("loading training data...")
-        self.train_data = data.Dataset(opt,split="train",subset=opt.data.train_sub)
-        self.train_loader = self.train_data.setup_loader(opt,shuffle=True)
-        log.info("loading test data...")
-        if opt.data.val_on_test: eval_split = "test"
-        self.test_data = data.Dataset(opt,split=eval_split,subset=opt.data.val_sub)
-        self.test_loader = self.test_data.setup_loader(opt,shuffle=False)
+    # def load_dataset(self,opt,eval_split="val"):
+    #     data = importlib.import_module("data.{}".format(opt.data.dataset))
+    #     log.info("loading training data...")
+    #     self.train_data = data.Dataset(opt,split="train",subset=opt.data.train_sub)
+    #     self.train_loader = self.train_data.setup_loader(opt,shuffle=True)
+    #     log.info("loading test data...")
+    #     if opt.data.val_on_test: eval_split = "test"
+    #     self.test_data = data.Dataset(opt,split=eval_split,subset=opt.data.val_sub)
+    #     self.test_loader = self.test_data.setup_loader(opt,shuffle=False)
+
+    def load_dataset(self, opt, eval_split="val"):
+        """
+        Instantiate datasets and dataloaders for train/val/test.
+
+        Uses data.get_dataset(name) to get the concrete dataset class.
+        Ensures self.train_loader, self.val_loader, and self.test_loader exist.
+        """
+        # 1. pick dataset name
+        ds_name = None
+        if hasattr(opt, "data") and getattr(opt.data, "dataset", None):
+            ds_name = opt.data.dataset
+        elif hasattr(opt, "data") and getattr(opt.data, "scene", None):
+            ds_name = opt.data.scene
+
+        if ds_name is None:
+            raise ValueError("No dataset specified. Use --data.dataset=<name> or --data.scene=<name>.")
+
+        # 2. get dataset class from registry
+        try:
+            DatasetClass = data.get_dataset(ds_name)
+        except Exception as e:
+            raise RuntimeError(f"Failed to locate dataset class for '{ds_name}': {e}")
+
+        # 3. train dataset
+        train_subset = getattr(opt.data, "train_sub", None) or getattr(opt.data, "subset", None)
+        try:
+            self.train_data = DatasetClass(opt, split="train", subset=train_subset)
+        except TypeError:
+            self.train_data = DatasetClass(opt, split="train")
+
+        # 4. val dataset
+        val_subset = getattr(opt.data, "val_sub", None)
+        try:
+            self.val_data = DatasetClass(opt, split=eval_split, subset=val_subset)
+        except TypeError:
+            try:
+                self.val_data = DatasetClass(opt, split=eval_split)
+            except TypeError:
+                self.val_data = None
+
+        # 5. test dataset
+        # Try split="test"; if not supported, fall back to val_data, then train_data
+        try:
+            self.test_data = DatasetClass(opt, split="test")
+        except TypeError:
+            # if dataset doesn’t distinguish splits, reuse val/train
+            self.test_data = self.val_data if self.val_data is not None else self.train_data
+
+        # 6. dataloaders
+        # train loader
+        try:
+            self.train_loader = self.train_data.setup_loader(opt, shuffle=True, drop_last=True)
+        except Exception:
+            self.train_loader = torch.utils.data.DataLoader(
+                self.train_data,
+                batch_size=opt.batch_size or 1,
+                num_workers=getattr(opt.data, "num_workers", 0),
+                shuffle=True,
+                drop_last=True
+            )
+
+        # val loader
+        if self.val_data is not None:
+            try:
+                self.val_loader = self.val_data.setup_loader(opt, shuffle=False, drop_last=False)
+            except Exception:
+                self.val_loader = torch.utils.data.DataLoader(
+                    self.val_data,
+                    batch_size=opt.batch_size or 1,
+                    num_workers=getattr(opt.data, "num_workers", 0),
+                    shuffle=False,
+                    drop_last=False
+                )
+        else:
+            self.val_loader = None
+
+        # test loader
+        if self.test_data is not None:
+            try:
+                self.test_loader = self.test_data.setup_loader(opt, shuffle=False, drop_last=False)
+            except Exception:
+                self.test_loader = torch.utils.data.DataLoader(
+                    self.test_data,
+                    batch_size=opt.batch_size or 1,
+                    num_workers=getattr(opt.data, "num_workers", 0),
+                    shuffle=False,
+                    drop_last=False
+                )
+        else:
+            # last resort: reuse train loader
+            self.test_loader = self.train_loader
+
+        # 7. optional preload (train only, like Blender)
+        try:
+            if getattr(opt.data, "preload", False):
+                if hasattr(self.train_data, "prefetch_all_data"):
+                    self.train_data.prefetch_all_data(opt)
+        except Exception:
+            pass
+
+        return
 
     def build_networks(self,opt):
         graph = importlib.import_module("model.{}".format(opt.model))

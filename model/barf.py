@@ -61,9 +61,10 @@ class Model(nerf.Model):
 
     @torch.no_grad()
     def validate(self,opt,ep=None):
-        pose,pose_GT = self.get_all_training_poses(opt)
-        _,self.graph.sim3 = self.prealign_cameras(opt,pose,pose_GT)
-        super().validate(opt,ep=ep)
+        # pose,pose_GT = self.get_all_training_poses(opt)
+        # _,self.graph.sim3 = self.prealign_cameras(opt,pose,pose_GT)
+        # super().validate(opt,ep=ep)
+        return
 
     @torch.no_grad()
     def log_scalars(self,opt,var,loss,metric=None,step=0,split="train"):
